@@ -1,12 +1,7 @@
-"""Healpix map → FITS image (J2000 / ICRS tangent plane)."""
+"""Healpix map → FITS image (J2000 / ICRS tangent plane) via healpy."""
 
 from __future__ import annotations
 
-import functools
-import os
-
-# Match healpy float64 precision in jax-healpy interpolation.
-os.environ.setdefault("JAX_ENABLE_X64", "1")
 from typing import Literal, Union
 
 import numpy as np
@@ -14,7 +9,6 @@ from astropy.io.fits import Header
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 
-Backend = Literal["auto", "jax", "healpy"]
 Interpolation = Literal["nearest", "linear"]
 
 
@@ -53,40 +47,9 @@ def lonlat_grid_from_wcs(wcs: WCS, h: int, w: int) -> tuple[np.ndarray, np.ndarr
     Uses ``all_pix2world`` on the pixel index grid (valid for SIN/TAN/ZEA/STG etc.).
     """
     validate_isometric_wcs(wcs)
-    yy, xx = np.indices((h, w), dtype=np.float64)
+    yy, xx = np.indices((h, w), dtype=np.float32)
     ra, dec = wcs.all_pix2world(xx, yy, 0)
-    return np.asarray(ra, dtype=np.float64), np.asarray(dec, dtype=np.float64)
-
-
-@functools.lru_cache(maxsize=8)
-def _jax_linear_sampler(nest: bool):
-    import jax
-    import jax.numpy as jnp
-    import jax_healpy as jhp
-
-    @jax.jit
-    def _sample(m: jnp.ndarray, ra_deg: jnp.ndarray, dec_deg: jnp.ndarray) -> jnp.ndarray:
-        vals = jhp.get_interp_val(m, ra_deg, dec_deg, lonlat=True, nest=nest)
-        ok = jnp.isfinite(ra_deg) & jnp.isfinite(dec_deg)
-        return jnp.where(ok, vals, jnp.nan)
-
-    return _sample
-
-
-@functools.lru_cache(maxsize=8)
-def _jax_nearest_sampler(nside: int, nest: bool):
-    import jax
-    import jax.numpy as jnp
-    import jax_healpy as jhp
-
-    @jax.jit
-    def _sample(m: jnp.ndarray, ra_deg: jnp.ndarray, dec_deg: jnp.ndarray) -> jnp.ndarray:
-        ipix = jhp.ang2pix(nside, ra_deg, dec_deg, lonlat=True, nest=nest)
-        vals = m[ipix]
-        ok = jnp.isfinite(ra_deg) & jnp.isfinite(dec_deg)
-        return jnp.where(ok, vals, jnp.nan)
-
-    return _sample
+    return np.asarray(ra, dtype=np.float32), np.asarray(dec, dtype=np.float32)
 
 
 def _interp_healpy(
@@ -103,46 +66,24 @@ def _interp_healpy(
     flat_ra = ra_deg.ravel()
     flat_dec = dec_deg.ravel()
     valid = np.isfinite(flat_ra) & np.isfinite(flat_dec)
-    out = np.zeros(flat_ra.size, dtype=np.float64)
+    out = np.zeros(flat_ra.size, dtype=np.float32)
     if interpolation == "nearest":
         ipix = hp.ang2pix(
             nside, flat_ra[valid], flat_dec[valid], lonlat=True, nest=nest
         )
         out[valid] = healpix_map[ipix]
     elif interpolation == "linear":
-        colat = np.deg2rad(90.0 - flat_dec[valid])
-        phi = np.deg2rad(flat_ra[valid])
-        out[valid] = hp.get_interp_val(healpix_map, colat, phi, nest=nest)
+        out[valid] = hp.get_interp_val(
+            healpix_map,
+            flat_dec[valid],
+            flat_ra[valid],
+            lonlat=True,
+            nest=nest,
+        )
     else:
         raise ValueError(f"Unknown interpolation {interpolation!r}")
     out[~valid] = np.nan
     return out.reshape(ra_deg.shape)
-
-
-def _interp_jax(
-    healpix_map: np.ndarray,
-    ra_deg: np.ndarray,
-    dec_deg: np.ndarray,
-    *,
-    nest: bool,
-    interpolation: Interpolation,
-) -> np.ndarray:
-    import jax.numpy as jnp
-
-    import healpy as hp
-
-    m = jnp.asarray(healpix_map, dtype=jnp.float64)
-    ra = jnp.asarray(ra_deg, dtype=jnp.float64)
-    dec = jnp.asarray(dec_deg, dtype=jnp.float64)
-    if interpolation == "nearest":
-        nside = hp.npix2nside(healpix_map.size)
-        sampler = _jax_nearest_sampler(nside, nest)
-    elif interpolation == "linear":
-        sampler = _jax_linear_sampler(nest)
-    else:
-        raise ValueError(f"Unknown interpolation {interpolation!r}")
-    out = sampler(m, ra, dec)
-    return np.asarray(out, dtype=np.float32)
 
 
 def healpix_to_j2000(
@@ -150,41 +91,17 @@ def healpix_to_j2000(
     header: Union[Header, WCS],
     *,
     nest: bool = False,
-    interpolation: Interpolation = "linear",
-    backend: Backend = "auto",
+    interpolation: Interpolation = "nearest",
 ) -> np.ndarray:
     """
-    Sample a Healpix map onto the pixel grid defined by a FITS header / WCS.
+    Sample a Healpix map onto the pixel grid defined by a FITS header / WCS (healpy).
 
-    Uses [jax-healpy](https://github.com/CMBSciPol/jax-healpy) by default for
-    bilinear interpolation (JIT-compiled). Assumes an **isometric** celestial WCS
-    (equal pixel scale); typical LWA SIN/TAN images satisfy this.
-
-    Parameters
-    ----------
-    healpix_map
-        1D Healpix array (RING ordering unless ``nest=True``).
-    header
-        FITS header or `~astropy.wcs.WCS` for the output image (celestial axes).
-    nest
-        Healpix nested ordering if True.
-    interpolation
-        ``"linear"`` (default) or ``"nearest"``.
-    backend
-        ``"auto"`` or ``"jax"`` → jax-healpy; ``"healpy"`` → classic healpy.
+    Assumes an **isometric** celestial WCS (equal pixel scale). For unresolved
+    point-source catalogs use ``interpolation="nearest"``; use ``"linear"`` for
+    smooth maps.
     """
     wcs, h, w = _celestial_wcs_and_shape(header)
     ra, dec = lonlat_grid_from_wcs(wcs, h, w)
-
-    use_jax = backend in ("auto", "jax")
-    if use_jax:
-        try:
-            return _interp_jax(
-                healpix_map, ra, dec, nest=nest, interpolation=interpolation
-            )
-        except ImportError:
-            if backend == "jax":
-                raise
     return _interp_healpy(
         healpix_map, ra, dec, nest=nest, interpolation=interpolation
-    ).astype(np.float32)
+    )

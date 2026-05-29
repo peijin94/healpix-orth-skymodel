@@ -13,7 +13,6 @@ dependencies = [
   "astropy>=5",
   "healpy>=1.16",
   "jax>=0.4.30",
-  "jax-healpy>=0.6",
   "scipy>=1.10",
 ]
 
