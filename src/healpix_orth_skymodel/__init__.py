@@ -12,6 +12,11 @@ from healpix_orth_skymodel.render import (
     catalog_to_theoretical_image,
     healpix_to_theoretical_image,
 )
+from healpix_orth_skymodel.resolution import (
+    healpix_resolution_arcsec,
+    nside_for_resolution_rad,
+    nside_match_wcs,
+)
 
 __all__ = [
     "healpix_to_j2000",
@@ -20,4 +25,7 @@ __all__ = [
     "catalog_to_healpix",
     "lonlat_grid_from_wcs",
     "validate_isometric_wcs",
+    "nside_for_resolution_rad",
+    "nside_match_wcs",
+    "healpix_resolution_arcsec",
 ]
