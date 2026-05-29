@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "healpix-orth-skymodel"
+version = "0.0.1"
+description = "Healpix theoretical skymodel with orthographic projection to FITS (JAX/healpy)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "astropy>=5",
+  "healpy>=1.16",
+  "jax>=0.4.30",
+  "jax-healpy>=0.6",
+  "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+dev = ["matplotlib", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
