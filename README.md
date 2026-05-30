@@ -51,7 +51,7 @@ m = catalog_to_healpix(
     deposition="nearest",
 )
 
-# Plain: healpy sample + PSF
+# Plain: healpy sample + PSF (64×64 center kernel by default; ``psf_kernel_size=64``)
 sky_plain = healpix_to_theoretical_image(
     m,
     fits_header,
@@ -101,7 +101,11 @@ Indicative timings on a single node (`testdir/benchmark_theoretical_sky.py` in t
 
 Plain Healpix at matched resolution is ~2.5× faster and lower memory, but peaks differ slightly from calcflow because of nearest-neighbor deposition.
 
-Plots and map build: `python testdir/make_plots.py --nside auto --plain-healpix` (parent repo).
+### PSF convolution
+
+Reference skies use **`jax.scipy.signal.fftconvolve`** only (`psf_fft_convolve`). The CLEAN beam is synthesized on a compact grid, then **center-cropped/padded to 64×64** (`psf_kernel_size=64`, default) before convolution — not a full `NAXIS1×NAXIS2` kernel (saves GPU memory on 4096² images).
+
+Plots and map build: `python testdir/make_plots.py --nside auto --plain-healpix` (parent dewarptest workspace).
 
 ## Module layout
 
@@ -109,7 +113,7 @@ Plots and map build: `python testdir/make_plots.py --nside auto --plain-healpix`
 |--------|------|
 | `catalog.py` | VLSS catalog → Healpix (FOV filter, beam, nearest/bilinear deposit) |
 | `projection.py` | `healpix_to_j2000` — healpy sample onto isometric celestial WCS |
-| `render.py` | PSF FFT + `healpix_to_theoretical_image` / `catalog_to_theoretical_image` |
+| `render.py` | `psf_fft_convolve` (JAX `fftconvolve`, 64×64 kernel) + `healpix_to_theoretical_image` |
 | `resolution.py` | `nside_match_wcs`, `healpix_resolution_arcsec` |
 | `_jax_cpu.py` | Force CPU JAX at import |
 
